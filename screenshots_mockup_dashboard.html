@@ -1,0 +1,247 @@
+<!-- Screen Time App - Dashboard Screenshot Mockup -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Screen Time App - Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .phone {
+            width: 375px;
+            height: 812px;
+            border: 12px solid #000;
+            border-radius: 40px;
+            overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            display: flex;
+            flex-direction: column;
+        }
+        .status-bar {
+            background: #f5f5f5;
+            height: 44px;
+            padding: 8px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .screen {
+            flex: 1;
+            background: white;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+        .screen-header {
+            padding: 24px 16px 16px;
+        }
+        .title {
+            font-size: 32px;
+            font-weight: 700;
+            color: #000;
+            margin-bottom: 20px;
+        }
+        .progress-card {
+            background: #f5f5f5;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .progress-label {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 8px;
+        }
+        .progress-value {
+            font-size: 28px;
+            font-weight: 700;
+            color: #6650a4;
+            margin-bottom: 12px;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background: #6650a4;
+            width: 65%;
+        }
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #000;
+            padding: 0 16px;
+            margin: 20px 0 12px 0;
+        }
+        .daily-items {
+            padding: 0 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .daily-item {
+            background: #f9f9f9;
+            border-radius: 8px;
+            padding: 12px;
+            border: 1px solid #f0f0f0;
+        }
+        .daily-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .daily-day {
+            font-weight: 600;
+            color: #000;
+        }
+        .daily-points {
+            font-size: 12px;
+            color: #6650a4;
+            font-weight: 600;
+        }
+        .daily-time {
+            font-size: 14px;
+            color: #666;
+        }
+        .badges-section {
+            padding: 0 16px;
+            margin-bottom: 20px;
+        }
+        .badges-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+        .badge {
+            background: linear-gradient(135deg, #90EE90 0%, #76D776 100%);
+            border-radius: 8px;
+            padding: 12px;
+            text-align: center;
+            color: white;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .nav-bar {
+            background: white;
+            border-top: 1px solid #e0e0e0;
+            height: 60px;
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+        }
+        .nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            flex: 1;
+            gap: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            color: #999;
+        }
+        .nav-item.active {
+            color: #6650a4;
+        }
+        .nav-icon {
+            font-size: 24px;
+        }
+    </style>
+</head>
+<body>
+    <div class="phone">
+        <div class="status-bar">
+            <span>9:41</span>
+            <span>●●●●●</span>
+        </div>
+        <div class="screen">
+            <div class="screen-header">
+                <div class="title">Dashboard</div>
+            </div>
+
+            <div style="padding: 0 16px;">
+                <div class="progress-card">
+                    <div class="progress-label">Week 8 Progress</div>
+                    <div class="progress-value">75 / 115 pts</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section-title">Weekly Breakdown</div>
+            <div class="daily-items">
+                <div class="daily-item">
+                    <div class="daily-header">
+                        <span class="daily-day">Monday</span>
+                        <span class="daily-points">+12 pts</span>
+                    </div>
+                    <div class="daily-time">2h 15m</div>
+                </div>
+                <div class="daily-item">
+                    <div class="daily-header">
+                        <span class="daily-day">Tuesday</span>
+                        <span class="daily-points">+15 pts</span>
+                    </div>
+                    <div class="daily-time">0m (Zero Day!) 🎉</div>
+                </div>
+                <div class="daily-item">
+                    <div class="daily-header">
+                        <span class="daily-day">Wednesday</span>
+                        <span class="daily-points">+10 pts</span>
+                    </div>
+                    <div class="daily-time">3h 42m</div>
+                </div>
+            </div>
+
+            <div class="section-title">Badges This Week</div>
+            <div class="badges-section">
+                <div class="badges-grid">
+                    <div class="badge" style="background: linear-gradient(135deg, #90EE90 0%, #76D776 100%);">
+                        🎯 Focused
+                    </div>
+                    <div class="badge" style="background: linear-gradient(135deg, #4169E1 0%, #1E40AF 100%);">
+                        ⭕ Zero Day
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="nav-bar">
+            <div class="nav-item active">
+                <div class="nav-icon">🏠</div>
+                <div>Home</div>
+            </div>
+            <div class="nav-item">
+                <div class="nav-icon">📊</div>
+                <div>Analytics</div>
+            </div>
+            <div class="nav-item">
+                <div class="nav-icon">⭐</div>
+                <div>Rewards</div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+
