@@ -22,6 +22,10 @@ interface AppLimitDao {
     suspend fun getAllLimitsOnce(): List<AppLimit>
     @Query("UPDATE app_limits SET usedTodayMinutes = :usedMinutes, isBlocked = :isBlocked WHERE packageName = :packageName")
     suspend fun updateUsageAndBlockStatus(packageName: String, usedMinutes: Int, isBlocked: Boolean)
+
+    @Query("UPDATE app_limits SET lastResetDate = :resetDate WHERE packageName = :packageName")
+    suspend fun updateLastResetDate(packageName: String, resetDate: String)
+
     @Query("UPDATE app_limits SET usedTodayMinutes = 0, isBlocked = 0, lastResetDate = :resetDate")
     suspend fun resetDailyUsage(resetDate: String)
     @Query("SELECT * FROM app_limits WHERE isBlocked = 1")

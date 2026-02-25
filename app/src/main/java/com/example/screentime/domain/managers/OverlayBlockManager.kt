@@ -49,6 +49,8 @@ class OverlayBlockManager(private val context: Context) {
     fun showBlockingOverlay(appName: String, usedMinutes: Int, limitMinutes: Int) {
         if (!hasOverlayPermission()) {
             android.util.Log.e("OverlayBlockManager", "No overlay permission!")
+            // Fallback: just go home
+            goToHomeScreen()
             return
         }
 
@@ -69,10 +71,8 @@ class OverlayBlockManager(private val context: Context) {
                 WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.MATCH_PARENT,
                 layoutFlag,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                        WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
-                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                        WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,  // Keep screen on and allow interaction
                 PixelFormat.TRANSLUCENT
             )
 
@@ -97,7 +97,8 @@ class OverlayBlockManager(private val context: Context) {
             // Add overlay to window
             windowManager?.addView(overlayView, params)
 
-            android.util.Log.d("OverlayBlockManager", "Overlay added successfully")
+            android.util.Log.d("OverlayBlockManager", "✅ Overlay added successfully - waiting for user to click button")
+
         } catch (e: Exception) {
             android.util.Log.e("OverlayBlockManager", "Error showing overlay", e)
             e.printStackTrace()

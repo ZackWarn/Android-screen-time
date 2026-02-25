@@ -122,24 +122,31 @@ class AppLimitManager(
         }
 
         // Reset if new day
-        val today = LocalDate.now().toString()
-        if (appLimit.lastResetDate != today) {
-            android.util.Log.d("AppLimitManager", "Resetting usage for new day: $packageName")
-            appLimitDao.updateUsageAndBlockStatus(packageName, 0, false)
-            return LimitStatus.WithinLimit(0, appLimit.limitMinutes)
+        val today = LocalDate.now()
+        val todayString = today.toString()
+        val lastResetDate = try {
+            LocalDate.parse(appLimit.lastResetDate)
+        } catch (e: Exception) {
+            LocalDate.MIN
         }
 
-        // Get current usage with in-progress session time
-        val currentUsageMillis = getCurrentAppUsageMillis(packageName)
-        val currentUsageMinutes = (currentUsageMillis / 60000L).toInt()
+        if (lastResetDate.isBefore(today)) {
+            android.util.Log.d("AppLimitManager", "🔄 Resetting usage for new day: $packageName")
+            appLimitDao.updateUsageAndBlockStatus(packageName, 0, false)
+            appLimitDao.updateLastResetDate(packageName, todayString)
+
+            // Re-fetch updated data to avoid stale values (FIX: Issue #1 - Race Condition)
+            val updatedLimit = appLimitDao.getAppLimit(packageName)
+            return LimitStatus.WithinLimit(0, updatedLimit?.limitMinutes ?: appLimit.limitMinutes)
+        }
+
+        // Use centralized blocking state update (FIX: Issue #5 - Consistent blocking logic)
+        val (currentUsageMinutes, isBlocked) = updateBlockingState(packageName, appLimit.limitMinutes, appLimit.isEnabled)
+
         android.util.Log.d(
             "AppLimitManager",
-            "Current usage for $packageName: $currentUsageMinutes min (limit: ${appLimit.limitMinutes} min)"
+            "📊 Current usage for $packageName: $currentUsageMinutes min (limit: ${appLimit.limitMinutes} min)"
         )
-
-        // Update usage
-        val isBlocked = currentUsageMillis >= appLimit.limitMinutes * 60L * 1000L
-        appLimitDao.updateUsageAndBlockStatus(packageName, currentUsageMinutes, isBlocked)
 
         return if (isBlocked) {
             android.util.Log.d("AppLimitManager", "BLOCKED: $packageName exceeded limit")
@@ -237,16 +244,28 @@ class AppLimitManager(
     }
 
     /**
+     * Centralized method to update blocking state (FIX: Issue #5 - Blocking State Inconsistency)
+     * Single source of truth for blocking logic
+     */
+    private suspend fun updateBlockingState(packageName: String, limitMinutes: Int, isEnabled: Boolean): Pair<Int, Boolean> {
+        val usageMillis = getCurrentAppUsageMillis(packageName)
+        val usageMinutes = (usageMillis / 60000L).toInt()
+        val isBlocked = isEnabled && usageMillis >= limitMinutes * 60L * 1000L
+
+        appLimitDao.updateUsageAndBlockStatus(packageName, usageMinutes, isBlocked)
+
+        return Pair(usageMinutes, isBlocked)
+    }
+
+    /**
      * Refresh usage for all limits so UI can show up-to-date minutes.
      */
     suspend fun refreshUsageForAllLimits() {
         try {
             val limits = appLimitDao.getAllLimitsOnce()
             limits.forEach { limit ->
-                val usageMillis = getCurrentAppUsageMillis(limit.packageName)
-                val usageMinutes = (usageMillis / 60000L).toInt()
-                val isBlocked = limit.isEnabled && usageMillis >= limit.limitMinutes * 60L * 1000L
-                appLimitDao.updateUsageAndBlockStatus(limit.packageName, usageMinutes, isBlocked)
+                // Use centralized blocking state update (FIX: Issue #5)
+                updateBlockingState(limit.packageName, limit.limitMinutes, limit.isEnabled)
             }
         } catch (e: Exception) {
             android.util.Log.e("AppLimitManager", "Error refreshing usage for limits", e)
@@ -279,15 +298,54 @@ class AppLimitManager(
         try {
             val usageStatsManager = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
             val now = System.currentTimeMillis()
-            val usageStats = usageStatsManager.queryUsageStats(
-                UsageStatsManager.INTERVAL_DAILY,
-                now - 1000 * 60,
-                now
-            )
-            if (usageStats.isEmpty()) return null
-            val sortedStats = usageStats.sortedByDescending { it.lastTimeUsed }
-            return sortedStats.firstOrNull()?.packageName
+
+            // FIX: Issue #3 - Use UsageEvents for accurate foreground detection
+            // Query events from last 10 seconds instead of 1 minute of stats
+            val usageEvents = usageStatsManager.queryEvents(now - 10000, now)
+            val event = android.app.usage.UsageEvents.Event()
+            var lastResumedApp: String? = null
+            var lastResumeTime = 0L
+            var lastPauseTime = 0L
+            val eventMap = mutableMapOf<String, Long>()  // Track latest event per app
+
+            // Find the most recent ACTIVITY_RESUMED event
+            while (usageEvents.hasNextEvent()) {
+                usageEvents.getNextEvent(event)
+                when (event.eventType) {
+                    android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED -> {
+                        if (event.timeStamp > lastResumeTime) {
+                            lastResumedApp = event.packageName
+                            lastResumeTime = event.timeStamp
+                        }
+                        eventMap[event.packageName] = event.timeStamp
+                    }
+                    android.app.usage.UsageEvents.Event.ACTIVITY_PAUSED -> {
+                        if (event.timeStamp > lastPauseTime) {
+                            lastPauseTime = event.timeStamp
+                        }
+                        // Only clear if this pause is MORE recent than resume
+                        if (event.packageName == lastResumedApp && event.timeStamp > lastResumeTime) {
+                            lastResumedApp = null
+                        }
+                    }
+                }
+            }
+
+            // Fallback: If UsageEvents didn't give us a result, use UsageStats
+            if (lastResumedApp == null) {
+                val usageStats = usageStatsManager.queryUsageStats(
+                    UsageStatsManager.INTERVAL_DAILY,
+                    now - 1000 * 60 * 5,  // Last 5 minutes
+                    now
+                )
+                if (usageStats.isNotEmpty()) {
+                    lastResumedApp = usageStats.sortedByDescending { it.lastTimeUsed }.firstOrNull()?.packageName
+                }
+            }
+
+            return lastResumedApp
         } catch (e: Exception) {
+            android.util.Log.e("AppLimitManager", "Error getting foreground app", e)
             e.printStackTrace()
             return null
         }

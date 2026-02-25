@@ -74,8 +74,8 @@ class AppMonitorService : Service() {
         // Register broadcast receiver for limit changes
         limitChangeReceiver = LimitChangeReceiver()
         val filter = IntentFilter("com.example.screentime.LIMIT_CHANGED")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            registerReceiver(limitChangeReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(limitChangeReceiver, filter, RECEIVER_NOT_EXPORTED)
         } else {
             registerReceiver(limitChangeReceiver, filter)
         }
@@ -164,18 +164,25 @@ class AppMonitorService : Service() {
                                 currentApp
                             }
 
+                            // Check overlay permission status
+                            val hasOverlay = overlayBlockManager.hasOverlayPermission()
+                            android.util.Log.d("AppMonitorService", "🔍 [CHECK] Overlay permission: $hasOverlay")
+
                             // Always show overlay when app is exceeded
                             // This ensures overlay shows even when app is closed and reopened
-                            if (overlayBlockManager.hasOverlayPermission()) {
+                            if (hasOverlay) {
+                                android.util.Log.d("AppMonitorService", "🚫 [OVERLAY] Attempting to show overlay for $appName")
                                 handler.post {
+                                    android.util.Log.d("AppMonitorService", "🚫 [OVERLAY] Handler.post executing for $appName")
                                     overlayBlockManager.showBlockingOverlay(appName, status.usedMinutes, status.limitMinutes)
                                 }
-                                android.util.Log.d("AppMonitorService", "🚫 [OVERLAY] Showing overlay for $currentApp")
                             } else {
-                                // Fallback: show notification with full screen intent to BlockedAppActivity
-                                android.util.Log.d("AppMonitorService", "📢 [NOTIFY] Showing limit exceeded notification for $currentApp")
-                                showLimitExceededNotification(currentApp, status.usedMinutes, status.limitMinutes)
+                                android.util.Log.d("AppMonitorService", "⚠️ [NO-OVERLAY] No overlay permission, using notification")
                             }
+
+                            // ALWAYS show notification regardless of overlay
+                            android.util.Log.d("AppMonitorService", "📢 [NOTIFY] Showing limit exceeded notification for $currentApp")
+                            showLimitExceededNotification(currentApp, status.usedMinutes, status.limitMinutes)
                         }
                         is LimitStatus.WithinLimit -> {
                             android.util.Log.d("AppMonitorService", "✅ [WITHIN] Within limit for $currentApp: ${status.usedMinutes}/${status.limitMinutes} min")
@@ -211,6 +218,19 @@ class AppMonitorService : Service() {
     }
     private fun showLimitExceededNotification(packageName: String, usedMinutes: Int, limitMinutes: Int) {
         try {
+            // Create intent to go to home screen immediately
+            val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_HOME)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            }
+
+            val homePendingIntent = PendingIntent.getActivity(
+                this,
+                packageName.hashCode() + 9000,
+                homeIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
             // Create intent for the blocked app activity
             val blockedIntent = Intent(this, BlockedAppActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NO_HISTORY
@@ -226,20 +246,29 @@ class AppMonitorService : Service() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
+            // Build heads-up notification that appears from top
             val notification = NotificationCompat.Builder(this, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setContentTitle("⏱️ Time's Up!")
-                .setContentText("You've used $usedMinutes of $limitMinutes minutes. Tap to go home.")
+                .setContentText("You've used $usedMinutes of $limitMinutes minutes.")
                 .setStyle(NotificationCompat.BigTextStyle()
                     .bigText("You've reached your daily limit for this app.\n\nUsed: $usedMinutes minutes\nLimit: $limitMinutes minutes\n\nTake a break and try again tomorrow!"))
                 .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setCategory(NotificationCompat.CATEGORY_ALARM)
                 .setFullScreenIntent(blockedPendingIntent, true)
+                .setContentIntent(homePendingIntent)  // Tap notification goes home
                 .setAutoCancel(true)
                 .setOngoing(false)
                 .setVibrate(longArrayOf(0, 500, 200, 500))
+                .setSound(android.provider.Settings.System.DEFAULT_NOTIFICATION_URI)
                 .setDefaults(NotificationCompat.DEFAULT_ALL)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setTimeoutAfter(10000)  // Auto-dismiss after 10 seconds
+                .addAction(
+                    R.drawable.ic_launcher_foreground,
+                    "Go Home",
+                    homePendingIntent
+                )
                 .build()
 
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -248,12 +277,21 @@ class AppMonitorService : Service() {
             val notificationId = packageName.hashCode() + 5000
             notificationManager.notify(notificationId, notification)
 
-            android.util.Log.d("AppMonitorService", "✅ Limit exceeded notification sent for $packageName (ID: $notificationId)")
+            android.util.Log.d("AppMonitorService", "✅ Heads-up notification sent for $packageName (ID: $notificationId)")
+
+            // Immediately send user to home screen
+            try {
+                homePendingIntent.send()
+                android.util.Log.d("AppMonitorService", "🏠 Sent to home screen")
+            } catch (e: Exception) {
+                android.util.Log.e("AppMonitorService", "Failed to send home intent", e)
+            }
         } catch (e: Exception) {
             android.util.Log.e("AppMonitorService", "Error showing limit exceeded notification", e)
             e.printStackTrace()
         }
     }
+
 
     private fun showWarningNotification(packageName: String, remainingMinutes: Int) {
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
@@ -285,15 +323,25 @@ class AppMonitorService : Service() {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "App Monitor",
-                NotificationManager.IMPORTANCE_HIGH  // Changed from LOW to HIGH for visible notifications
+                NotificationManager.IMPORTANCE_HIGH  // HIGH for heads-up notifications
             ).apply {
                 description = "Monitors app usage and enforces limits"
                 setShowBadge(true)
                 enableLights(true)
                 enableVibration(true)
+                setSound(
+                    android.provider.Settings.System.DEFAULT_NOTIFICATION_URI,
+                    android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+                setBypassDnd(true)  // Bypass Do Not Disturb for limit notifications
             }
             val notificationManager = getSystemService(NotificationManager::class.java)
             notificationManager.createNotificationChannel(channel)
+            android.util.Log.d("AppMonitorService", "✅ Notification channel created with HIGH importance")
         }
     }
 }
