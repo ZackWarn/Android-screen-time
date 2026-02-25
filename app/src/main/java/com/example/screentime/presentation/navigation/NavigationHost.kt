@@ -5,6 +5,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -25,6 +26,10 @@ import com.example.screentime.presentation.viewmodels.AnalyticsViewModel
 import com.example.screentime.presentation.viewmodels.DashboardViewModel
 import com.example.screentime.presentation.viewmodels.RewardsViewModel
 import android.content.Context
+import android.app.Application
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.viewmodel.compose.viewModel
 
 sealed class Screen(val route: String, val label: String) {
     data object Dashboard : Screen("dashboard", "Home")
@@ -47,7 +52,12 @@ fun NavigationHost(
 
     // Initialize ViewModels
     val dashboardViewModel = remember {
-        DashboardViewModel(screenTimeRepository, badgeRepository, weeklyStatsRepository)
+        DashboardViewModel(
+            context.applicationContext as Application,
+            screenTimeRepository,
+            badgeRepository,
+            weeklyStatsRepository
+        )
     }
     val analyticsViewModel = remember {
         AnalyticsViewModel(screenTimeRepository, weeklyStatsRepository)
