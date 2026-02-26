@@ -1,5 +1,5 @@
 package com.example.screentime.presentation.screens
-import androidx.compose.foundation.clickable
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -17,6 +17,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.screentime.data.entities.AppLimit
+
 @Composable
 fun AppLimitsScreen(
     appLimits: List<AppLimit>,
@@ -25,6 +26,13 @@ fun AppLimitsScreen(
     onDeleteLimit: (AppLimit) -> Unit,
     onToggleLimit: (AppLimit) -> Unit
 ) {
+    var searchQuery by remember { mutableStateOf("") }
+
+    // Filtering logic: only by search
+    val filteredAppLimits = appLimits.filter {
+        it.appName.contains(searchQuery, ignoreCase = true)
+    }
+
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background
@@ -53,7 +61,26 @@ fun AppLimitsScreen(
                 }
             }
             Spacer(modifier = Modifier.height(16.dp))
-            if (appLimits.isEmpty()) {
+
+            // Search bar
+            TextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                placeholder = {
+                    Text("Search app limits...")
+                },
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                    focusedIndicatorColor = MaterialTheme.colorScheme.primary,
+                    unfocusedIndicatorColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+                )
+            )
+
+            if (filteredAppLimits.isEmpty()) {
                 // Empty state
                 Box(
                     modifier = Modifier.fillMaxSize(),
@@ -81,7 +108,7 @@ fun AppLimitsScreen(
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(appLimits) { appLimit ->
+                    items(filteredAppLimits) { appLimit ->
                         AppLimitCard(
                             appLimit = appLimit,
                             onEdit = { onEditLimit(appLimit) },
@@ -94,6 +121,7 @@ fun AppLimitsScreen(
         }
     }
 }
+
 @Composable
 fun AppLimitCard(
     appLimit: AppLimit,
@@ -131,7 +159,7 @@ fun AppLimitCard(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Limit:  min/day",
+                        text = "Limit: ${appLimit.limitMinutes} min/day",
                         fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                     )
@@ -149,12 +177,12 @@ fun AppLimitCard(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = "Today:  min",
+                        text = "Today: ${appLimit.usedTodayMinutes} min",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Medium
                     )
                     Text(
-                        text = " min left",
+                        text = "${(appLimit.limitMinutes - appLimit.usedTodayMinutes).coerceAtLeast(0)} min left",
                         fontSize = 14.sp,
                         color = if (appLimit.usedTodayMinutes >= appLimit.limitMinutes) {
                             Color(0xFFFF6B6B)
@@ -165,7 +193,7 @@ fun AppLimitCard(
                 }
                 Spacer(modifier = Modifier.height(8.dp))
                 LinearProgressIndicator(
-                    progress = (appLimit.usedTodayMinutes.toFloat() / appLimit.limitMinutes.toFloat()).coerceIn(0f, 1f),
+                    progress = { (appLimit.usedTodayMinutes.toFloat() / appLimit.limitMinutes.toFloat()).coerceIn(0f, 1f) },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(8.dp),
@@ -180,7 +208,7 @@ fun AppLimitCard(
             if (appLimit.isBlocked) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "?? Blocked until tomorrow",
+                    text = "Blocked until tomorrow",
                     fontSize = 12.sp,
                     color = Color(0xFFFF6B6B),
                     fontWeight = FontWeight.SemiBold

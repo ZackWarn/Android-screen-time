@@ -25,4 +25,3 @@ data class AppUsageSession(
     val endTime: Long, // Unix timestamp
     val durationMinutes: Int
 )
-

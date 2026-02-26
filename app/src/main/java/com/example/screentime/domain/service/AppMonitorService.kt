@@ -27,6 +27,10 @@ class AppMonitorService : Service() {
     private var monitoringRunnable: Runnable? = null
     private var lastCheckedApp: String? = null
     private val sessionSavedApps = mutableMapOf<String, Long>()  // Track last time we saved a session per app
+    private val lastWarningRemaining = mutableMapOf<String, Int>() // Track last warning remaining per app
+    private var lastWarningApp: String? = null
+    private var lastWarningMinute: Int? = null
+    private var lastAppUsageMinutes: Int = 0  // Track previous usage to detect changes
 
     private inner class LimitChangeReceiver : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -65,7 +69,7 @@ class AppMonitorService : Service() {
         val database = ScreenTimeDatabase.getDatabase(applicationContext)
         appLimitManager = AppLimitManager(applicationContext, database.appLimitDao(), database)
 
-        // ...existing code...
+        // Clear sessionSavedApps on service start
         sessionSavedApps.clear()
 
         // Register broadcast receiver for limit changes
@@ -114,16 +118,16 @@ class AppMonitorService : Service() {
         serviceScope.launch {
             try {
                 val currentApp = appLimitManager.getForegroundApp()
-                android.util.Log.d("AppMonitorService", "📱 [CHECK] Checking app: $currentApp")
+                android.util.Log.d("AppMonitorService", "Checking app: $currentApp")
 
                 if (currentApp != null && currentApp != packageName) {
-                    android.util.Log.d("AppMonitorService", "📱 [CHECK] Current app: $currentApp, Last checked: $lastCheckedApp")
+                    android.util.Log.d("AppMonitorService", "Current app: $currentApp, Last checked: $lastCheckedApp")
 
                     // Always check the app usage
                     val status = appLimitManager.checkAppUsage(currentApp)
-                    android.util.Log.d("AppMonitorService", "📊 [STATUS] Status for $currentApp: ${status::class.simpleName}")
+                    android.util.Log.d("AppMonitorService", "Status for $currentApp: ${status::class.simpleName}")
 
-                    // Save usage session periodically (once per minute per app) to avoid duplicate saves
+                    // Save usage session when app changes or usage increases
                     if (status is LimitStatus.WithinLimit || status is LimitStatus.Exceeded) {
                         val usedMinutes = when (status) {
                             is LimitStatus.WithinLimit -> status.usedMinutes
@@ -131,54 +135,42 @@ class AppMonitorService : Service() {
                             else -> 0
                         }
 
-                        if (usedMinutes > 0) {
-                            val now = System.currentTimeMillis()
-                            val lastSavedTime = sessionSavedApps[currentApp] ?: 0L
-                            val timeSinceLastSave = now - lastSavedTime
-
-                            // Save session only if 60+ seconds have passed since last save
-                            if (timeSinceLastSave >= 60_000L) {
-                                android.util.Log.d("AppMonitorService", "💾 [SAVE] Saving session: $currentApp = $usedMinutes min (time since last save: ${timeSinceLastSave/1000}s)")
+                        // Save session if:
+                        // 1. App switched (lastCheckedApp != currentApp), or
+                        // 2. Usage increased by at least 1 minute
+                        if (currentApp != lastCheckedApp || usedMinutes > lastAppUsageMinutes) {
+                            if (usedMinutes > 0) {
+                                android.util.Log.d("AppMonitorService", "💾 Saving session: $currentApp = $usedMinutes min")
                                 appLimitManager.saveUsageSession(currentApp, usedMinutes)
-                                sessionSavedApps[currentApp] = now
-                            } else {
-                                android.util.Log.d("AppMonitorService", "⏳ [SKIP] Not saving yet: ${(60_000L - timeSinceLastSave)/1000}s until next save for $currentApp")
+                                lastAppUsageMinutes = usedMinutes
                             }
                         }
                     }
 
                     when (status) {
                         is LimitStatus.Exceeded -> {
-                            android.util.Log.d("AppMonitorService", "🚨 [EXCEEDED] LIMIT EXCEEDED for $currentApp: ${status.usedMinutes}/${status.limitMinutes} min")
+                            android.util.Log.d("AppMonitorService", "LIMIT EXCEEDED for $currentApp: ${status.usedMinutes}/${status.limitMinutes} min")
 
-                            // Get app name
-                            val appName = try {
-                                val pm = applicationContext.packageManager
-                                val appInfo = pm.getApplicationInfo(currentApp, 0)
-                                pm.getApplicationLabel(appInfo).toString()
-                            } catch (e: Exception) {
-                                currentApp
-                            }
-
-                            // Show blocking activity
-                            android.util.Log.d("AppMonitorService", "🚫 [BLOCKED] Showing blocked app activity for $appName")
-                            showBlockDialog(currentApp, status.usedMinutes, status.limitMinutes)
-
-                            // ALWAYS show notification as well
-                            android.util.Log.d("AppMonitorService", "📢 [NOTIFY] Showing limit exceeded notification for $currentApp")
+                            // Always show notification when limit is exceeded
+                            android.util.Log.d("AppMonitorService", "📢 Showing limit exceeded notification for $currentApp")
                             showLimitExceededNotification(currentApp, status.usedMinutes, status.limitMinutes)
                         }
                         is LimitStatus.WithinLimit -> {
-                            android.util.Log.d("AppMonitorService", "✅ [WITHIN] Within limit for $currentApp: ${status.usedMinutes}/${status.limitMinutes} min")
+                            android.util.Log.d("AppMonitorService", "Within limit for $currentApp: ${status.usedMinutes}/${status.limitMinutes} min")
                             val remaining = status.limitMinutes - status.usedMinutes
-                            if (remaining <= 5 && remaining > 0) {
-                                // Warn user when 5 minutes or less remaining
-                                android.util.Log.d("AppMonitorService", "⚠️  [WARNING] Only $remaining min remaining for $currentApp")
-                                showWarningNotification(currentApp, remaining)
-                            }
+                            // Only show warning for 5 min and 1 min remaining
+                            if ((remaining == 5 || remaining == 1) && remaining > 0) {
+                                android.util.Log.d("AppMonitorService", "WARNING: Only $remaining min remaining for $currentApp")
+                                // Only show warning if app or minute has changed
+                                if (currentApp != lastWarningApp || remaining != lastWarningMinute) {
+                                    showWarningNotification(currentApp, remaining)
+                                    lastWarningApp = currentApp
+                                    lastWarningMinute = remaining
+                                }
+                              }
                         }
                         else -> {
-                            android.util.Log.d("AppMonitorService", "ℹ️  [NO LIMIT] No limit set for $currentApp")
+                            android.util.Log.d("AppMonitorService", "No limit set for $currentApp")
                         }
                     }
 
@@ -186,7 +178,7 @@ class AppMonitorService : Service() {
                     lastCheckedApp = currentApp
                 }
             } catch (e: Exception) {
-                android.util.Log.e("AppMonitorService", "❌ [ERROR] Error checking app", e)
+                android.util.Log.e("AppMonitorService", "Error checking app", e)
                 e.printStackTrace()
             }
         }
@@ -248,6 +240,7 @@ class AppMonitorService : Service() {
                     .bigText("$appName has reached its daily limit.\n\n✓ Used: $usedMinutes minutes\n✓ Limit: $limitMinutes minutes\n\nTake a break and return after 12 noon tomorrow!"))
                 .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setCategory(NotificationCompat.CATEGORY_ALARM)
+                .setFullScreenIntent(blockedPendingIntent,true)
                 .setContentIntent(blockedPendingIntent)
                 .setAutoCancel(true)
                 .setOngoing(false)
@@ -278,15 +271,32 @@ class AppMonitorService : Service() {
 
 
     private fun showWarningNotification(packageName: String, remainingMinutes: Int) {
+        val appName = try {
+            val pm = applicationContext.packageManager
+            val appInfo = pm.getApplicationInfo(packageName, 0)
+            pm.getApplicationLabel(appInfo).toString()
+        } catch (e: Exception) {
+            packageName
+        }
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("App Limit Warning")
-            .setContentText("Only $remainingMinutes minutes remaining for this app")
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setContentTitle("$appName - Limit Warning")
+            .setContentText("Only $remainingMinutes min left today.")
+            .setStyle(NotificationCompat.BigTextStyle()
+                .bigText("$appName is almost at its daily limit.\n\n✓ Remaining: $remainingMinutes min\n\nLimit resets at 12 noon tomorrow!"))
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setAutoCancel(true)
+            .setOngoing(false)
+            .setVibrate(longArrayOf(0, 300, 200, 300))
+            .setSound(android.provider.Settings.System.DEFAULT_NOTIFICATION_URI)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setTimeoutAfter(8000)
             .build()
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(packageName.hashCode() + 1000, notification)
+        android.util.Log.d("AppMonitorService", "✅ Heads-up warning notification sent for $appName (ID: ${packageName.hashCode() + 1000})")
     }
     private fun createNotification(text: String): Notification {
         val intent = Intent(this, MainActivity::class.java)
@@ -327,5 +337,16 @@ class AppMonitorService : Service() {
             notificationManager.createNotificationChannel(channel)
             android.util.Log.d("AppMonitorService", "✅ Notification channel created with HIGH importance")
         }
+    }
+
+    private fun getMidnightTimestamp(): Long {
+        val now = System.currentTimeMillis()
+        val calendar = java.util.Calendar.getInstance()
+        calendar.timeInMillis = now
+        calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
+        calendar.set(java.util.Calendar.MINUTE, 0)
+        calendar.set(java.util.Calendar.SECOND, 0)
+        calendar.set(java.util.Calendar.MILLISECOND, 0)
+        return calendar.timeInMillis
     }
 }

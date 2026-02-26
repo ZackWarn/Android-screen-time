@@ -1,9 +1,10 @@
 package com.example.screentime.presentation
+
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.background
+import androidx.activity.OnBackPressedCallback
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Warning
@@ -17,10 +18,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.screentime.ui.theme.ScreenTimeTheme
+
 class BlockedAppActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val packageName = intent.getStringExtra("packageName") ?: ""
         val usedMinutes = intent.getIntExtra("usedMinutes", 0)
         val limitMinutes = intent.getIntExtra("limitMinutes", 0)
         setContent {
@@ -32,11 +33,12 @@ class BlockedAppActivity : ComponentActivity() {
                 )
             }
         }
-    }
-
-    override fun onBackPressed() {
-        // Prevent going back to the blocked app, go to home instead
-        goToHomeScreen()
+        // Modern back handling
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                goToHomeScreen()
+            }
+        })
     }
 
     private fun goToHomeScreen() {
@@ -48,6 +50,7 @@ class BlockedAppActivity : ComponentActivity() {
         finish()
     }
 }
+
 @Composable
 fun BlockedAppScreen(
     usedMinutes: Int,
