@@ -46,12 +46,11 @@ class OverlayBlockManager(private val context: Context) {
     /**
      * Show blocking overlay and go to home screen
      */
-    fun showBlockingOverlay(appName: String, usedMinutes: Int, limitMinutes: Int) {
+    fun showBlockingOverlay(appName: String, usedMinutes: Int, limitMinutes: Int): Boolean {
         if (!hasOverlayPermission()) {
             android.util.Log.e("OverlayBlockManager", "No overlay permission!")
-            // Fallback: just go home
-            goToHomeScreen()
-            return
+            // No overlay permission: avoid forcing home so the user can grant permission
+            return false
         }
 
         try {
@@ -98,12 +97,13 @@ class OverlayBlockManager(private val context: Context) {
             windowManager?.addView(overlayView, params)
 
             android.util.Log.d("OverlayBlockManager", "✅ Overlay added successfully - waiting for user to click button")
-
+            return true
         } catch (e: Exception) {
             android.util.Log.e("OverlayBlockManager", "Error showing overlay", e)
             e.printStackTrace()
             // Fallback: just go to home screen
             goToHomeScreen()
+            return false
         }
     }
 

@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.ScreenTime" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.ScreenTime" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="colorPrimary">#6200EE</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="colorSurface">#FFFFFF</item>
+        <item name="colorOnSurface">#1A1A1A</item>
+        <item name="colorOutline">#E0E0E0</item>
+    </style>
 </resources>

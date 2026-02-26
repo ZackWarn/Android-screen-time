@@ -32,6 +32,9 @@ class MainActivity : ComponentActivity() {
         private const val PERMISSION_REQUEST_CODE = 100
     }
 
+    private val showUsageAccessDialog = mutableStateOf(false)
+    private val showOverlayPermissionDialog = mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -45,20 +48,16 @@ class MainActivity : ComponentActivity() {
         // Start app monitoring service
         AppMonitorService.startService(this)
 
-        setContent {
-            val showUsageAccessDialog = remember { mutableStateOf(false) }
-            val showOverlayPermissionDialog = remember { mutableStateOf(false) }
+        // Initialize permission prompts
+        updatePermissionDialogs()
 
+        setContent {
             // Check if Usage Access is enabled and show dialog if not
-            if (!hasUsageAccessPermission() && savedInstanceState == null) {
-                showUsageAccessDialog.value = true
-            }
+            showUsageAccessDialog.value = !hasUsageAccessPermission()
 
             // Check if Overlay permission is enabled
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
-                !Settings.canDrawOverlays(this) && savedInstanceState == null) {
-                showOverlayPermissionDialog.value = true
-            }
+            showOverlayPermissionDialog.value = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+                !Settings.canDrawOverlays(this)
 
             ScreenTimeTheme {
                 Surface(
@@ -200,9 +199,19 @@ class MainActivity : ComponentActivity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == PERMISSION_REQUEST_CODE) {
-            // Permissions have been handled
-            // App can continue with or without notifications permission
+            updatePermissionDialogs()
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        updatePermissionDialogs()
+    }
+
+    private fun updatePermissionDialogs() {
+        showUsageAccessDialog.value = !hasUsageAccessPermission()
+        showOverlayPermissionDialog.value = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+            !Settings.canDrawOverlays(this)
     }
 
     override fun onDestroy() {

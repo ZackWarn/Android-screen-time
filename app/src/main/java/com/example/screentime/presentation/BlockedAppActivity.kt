@@ -1,4 +1,5 @@
 package com.example.screentime.presentation
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -27,21 +28,31 @@ class BlockedAppActivity : ComponentActivity() {
                 BlockedAppScreen(
                     usedMinutes = usedMinutes,
                     limitMinutes = limitMinutes,
-                    onClose = { finish() }
+                    onGoHome = { goToHomeScreen() }
                 )
             }
         }
     }
+
     override fun onBackPressed() {
-        // Prevent going back to the blocked app
-        moveTaskToBack(true)
+        // Prevent going back to the blocked app, go to home instead
+        goToHomeScreen()
+    }
+
+    private fun goToHomeScreen() {
+        val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_HOME)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        }
+        startActivity(homeIntent)
+        finish()
     }
 }
 @Composable
 fun BlockedAppScreen(
     usedMinutes: Int,
     limitMinutes: Int,
-    onClose: () -> Unit
+    onGoHome: () -> Unit
 ) {
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -94,13 +105,13 @@ fun BlockedAppScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = " min",
+                        text = "$usedMinutes min",
                         fontSize = 48.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFFFF6B6B)
                     )
                     Text(
-                        text = "out of  min daily limit",
+                        text = "out of $limitMinutes min daily limit",
                         fontSize = 16.sp,
                         color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
                     )
@@ -123,7 +134,7 @@ fun BlockedAppScreen(
             Spacer(modifier = Modifier.height(48.dp))
             // Close button
             Button(
-                onClick = onClose,
+                onClick = onGoHome,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 32.dp)

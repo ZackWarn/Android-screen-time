@@ -13,7 +13,6 @@ import com.example.screentime.MainActivity
 import com.example.screentime.R
 import com.example.screentime.data.ScreenTimeDatabase
 import com.example.screentime.domain.managers.AppLimitManager
-import com.example.screentime.domain.managers.OverlayBlockManager
 import com.example.screentime.domain.models.LimitStatus
 import com.example.screentime.presentation.BlockedAppActivity
 import kotlinx.coroutines.CoroutineScope
@@ -23,7 +22,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 class AppMonitorService : Service() {
     private lateinit var appLimitManager: AppLimitManager
-    private lateinit var overlayBlockManager: OverlayBlockManager
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val handler = Handler(Looper.getMainLooper())
     private var monitoringRunnable: Runnable? = null
@@ -66,9 +64,8 @@ class AppMonitorService : Service() {
         android.util.Log.d("AppMonitorService", "Service onCreate called")
         val database = ScreenTimeDatabase.getDatabase(applicationContext)
         appLimitManager = AppLimitManager(applicationContext, database.appLimitDao(), database)
-        overlayBlockManager = OverlayBlockManager(applicationContext)
 
-        // Initialize session saved times to now so we don't save duplicate sessions on restart
+        // ...existing code...
         sessionSavedApps.clear()
 
         // Register broadcast receiver for limit changes
@@ -92,7 +89,6 @@ class AppMonitorService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         monitoringRunnable?.let { handler.removeCallbacks(it) }
-        overlayBlockManager.removeOverlay()
 
         // Unregister broadcast receiver
         if (limitChangeReceiver != null) {
@@ -164,23 +160,11 @@ class AppMonitorService : Service() {
                                 currentApp
                             }
 
-                            // Check overlay permission status
-                            val hasOverlay = overlayBlockManager.hasOverlayPermission()
-                            android.util.Log.d("AppMonitorService", "🔍 [CHECK] Overlay permission: $hasOverlay")
+                            // Show blocking activity
+                            android.util.Log.d("AppMonitorService", "🚫 [BLOCKED] Showing blocked app activity for $appName")
+                            showBlockDialog(currentApp, status.usedMinutes, status.limitMinutes)
 
-                            // Always show overlay when app is exceeded
-                            // This ensures overlay shows even when app is closed and reopened
-                            if (hasOverlay) {
-                                android.util.Log.d("AppMonitorService", "🚫 [OVERLAY] Attempting to show overlay for $appName")
-                                handler.post {
-                                    android.util.Log.d("AppMonitorService", "🚫 [OVERLAY] Handler.post executing for $appName")
-                                    overlayBlockManager.showBlockingOverlay(appName, status.usedMinutes, status.limitMinutes)
-                                }
-                            } else {
-                                android.util.Log.d("AppMonitorService", "⚠️ [NO-OVERLAY] No overlay permission, using notification")
-                            }
-
-                            // ALWAYS show notification regardless of overlay
+                            // ALWAYS show notification as well
                             android.util.Log.d("AppMonitorService", "📢 [NOTIFY] Showing limit exceeded notification for $currentApp")
                             showLimitExceededNotification(currentApp, status.usedMinutes, status.limitMinutes)
                         }
@@ -227,7 +211,7 @@ class AppMonitorService : Service() {
                 packageName
             }
 
-            // Create intent to go to home screen immediately
+            // Create intent to go to home screen (action button only)
             val homeIntent = Intent(Intent.ACTION_MAIN).apply {
                 addCategory(Intent.CATEGORY_HOME)
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
@@ -255,7 +239,7 @@ class AppMonitorService : Service() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
-            // Build heads-up notification that appears from top
+            // Build heads-up notification (no auto-home or full-screen intent)
             val notification = NotificationCompat.Builder(this, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setContentTitle("⏱️ $appName - Time's Up!")
@@ -264,15 +248,14 @@ class AppMonitorService : Service() {
                     .bigText("$appName has reached its daily limit.\n\n✓ Used: $usedMinutes minutes\n✓ Limit: $limitMinutes minutes\n\nTake a break and return after 12 noon tomorrow!"))
                 .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setCategory(NotificationCompat.CATEGORY_ALARM)
-                .setFullScreenIntent(blockedPendingIntent, true)
-                .setContentIntent(homePendingIntent)  // Tap notification goes home
+                .setContentIntent(blockedPendingIntent)
                 .setAutoCancel(true)
                 .setOngoing(false)
                 .setVibrate(longArrayOf(0, 500, 200, 500))
                 .setSound(android.provider.Settings.System.DEFAULT_NOTIFICATION_URI)
                 .setDefaults(NotificationCompat.DEFAULT_ALL)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-                .setTimeoutAfter(10000)  // Auto-dismiss after 10 seconds
+                .setTimeoutAfter(10000)
                 .addAction(
                     R.drawable.ic_launcher_foreground,
                     "Go Home",
@@ -287,14 +270,6 @@ class AppMonitorService : Service() {
             notificationManager.notify(notificationId, notification)
 
             android.util.Log.d("AppMonitorService", "✅ Heads-up notification sent for $appName (ID: $notificationId)")
-
-            // Immediately send user to home screen
-            try {
-                homePendingIntent.send()
-                android.util.Log.d("AppMonitorService", "🏠 Sent to home screen")
-            } catch (e: Exception) {
-                android.util.Log.e("AppMonitorService", "Failed to send home intent", e)
-            }
         } catch (e: Exception) {
             android.util.Log.e("AppMonitorService", "Error showing limit exceeded notification", e)
             e.printStackTrace()
