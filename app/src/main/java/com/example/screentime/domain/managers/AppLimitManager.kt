@@ -121,23 +121,28 @@ class AppLimitManager(
             return LimitStatus.NoLimit
         }
 
-        // Reset if new day
-        val today = LocalDate.now()
+        // Reset if new day (midnight reset point)
+        val now = LocalDateTime.now()
+        val today = now.toLocalDate()
         val todayString = today.toString()
+
         val lastResetDate = try {
             LocalDate.parse(appLimit.lastResetDate)
         } catch (e: Exception) {
             LocalDate.MIN
         }
 
-        if (lastResetDate.isBefore(today)) {
-            android.util.Log.d("AppLimitManager", "🔄 Resetting usage for new day: $packageName")
+        val shouldReset = lastResetDate.isBefore(today)
+
+        if (shouldReset) {
+            android.util.Log.d(
+                "AppLimitManager",
+                "🔄 Resetting usage at midnight for: $packageName (last reset: ${appLimit.lastResetDate}, new: $todayString)"
+            )
             appLimitDao.updateUsageAndBlockStatus(packageName, 0, false)
             appLimitDao.updateLastResetDate(packageName, todayString)
 
-            // Re-fetch updated data to avoid stale values (FIX: Issue #1 - Race Condition)
-            val updatedLimit = appLimitDao.getAppLimit(packageName)
-            return LimitStatus.WithinLimit(0, updatedLimit?.limitMinutes ?: appLimit.limitMinutes)
+            return LimitStatus.WithinLimit(0, appLimit.limitMinutes)
         }
 
         // Use centralized blocking state update (FIX: Issue #5 - Consistent blocking logic)
@@ -171,61 +176,66 @@ class AppLimitManager(
         try {
             val usageStatsManager = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
             val now = System.currentTimeMillis()
-            val startOfDay = LocalDate.now().atStartOfDay()
+            val startOfDayMillis = LocalDate.now().atStartOfDay()
                 .atZone(java.time.ZoneId.systemDefault())
                 .toInstant()
                 .toEpochMilli()
 
-            android.util.Log.d("AppLimitManager", "Getting usage from $startOfDay to $now")
+            android.util.Log.d("AppLimitManager", "Getting usage from $startOfDayMillis to $now")
 
             val usageStats = usageStatsManager.queryUsageStats(
                 UsageStatsManager.INTERVAL_DAILY,
-                startOfDay,
+                startOfDayMillis,
                 now
             )
 
             android.util.Log.d("AppLimitManager", "Total usage stats entries: ${usageStats.size}")
 
-            val appUsage = usageStats.find { it.packageName == packageName }
-            val baseUsageMillis = appUsage?.totalTimeInForeground ?: 0L
-
-            // Add ongoing session time by checking the latest resume/pause events
-            // Always query fresh from UsageEvents - don't rely on in-memory state
-            val usageEvents = usageStatsManager.queryEvents(startOfDay, now)
-            var latestResumeTime = 0L
-            var latestPauseTime = 0L
-            var lastEventType = 0  // Track the type of last event
+            // Calculate usage ONLY from events after startOfDayMillis (midnight)
+            // Don't use totalTimeInForeground as it may include old data
+            val usageEvents = usageStatsManager.queryEvents(startOfDayMillis, now)
             val event = android.app.usage.UsageEvents.Event()
 
+            var totalUsageMillis = 0L
+            var currentSessionStart = 0L
+            var isAppActive = false
+
+            // Process all events to calculate total usage since midnight
             while (usageEvents.hasNextEvent()) {
                 usageEvents.getNextEvent(event)
-                if (event.packageName == packageName) {
+
+                if (event.packageName == packageName && event.timeStamp >= startOfDayMillis) {
                     when (event.eventType) {
                         android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED -> {
-                            latestResumeTime = event.timeStamp
-                            lastEventType = event.eventType
+                            // App started - mark the session start time
+                            currentSessionStart = event.timeStamp
+                            isAppActive = true
                         }
-                        android.app.usage.UsageEvents.Event.ACTIVITY_PAUSED -> {
-                            latestPauseTime = event.timeStamp
-                            lastEventType = event.eventType
+                        android.app.usage.UsageEvents.Event.ACTIVITY_PAUSED,
+                        android.app.usage.UsageEvents.Event.ACTIVITY_STOPPED -> {
+                            // App paused/stopped - calculate session duration
+                            if (isAppActive && currentSessionStart > 0) {
+                                val sessionDuration = event.timeStamp - currentSessionStart
+                                totalUsageMillis += sessionDuration
+                                currentSessionStart = 0L
+                                isAppActive = false
+                            }
                         }
                     }
                 }
             }
 
-            // Calculate live usage: only count time if app is currently active (last event was RESUMED)
-            val inProgressMillis = if (lastEventType == android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED && latestResumeTime > latestPauseTime) {
-                (now - latestResumeTime).coerceAtLeast(0L)
-            } else {
-                0L
+            // If app is currently active, add the ongoing session time
+            if (isAppActive && currentSessionStart > 0) {
+                val ongoingSession = now - currentSessionStart
+                totalUsageMillis += ongoingSession
             }
 
-            val totalUsageMillis = baseUsageMillis + inProgressMillis
             val usageMinutes = (totalUsageMillis / 1000 / 60).toInt()
 
             android.util.Log.d(
                 "AppLimitManager",
-                "Usage for $packageName: $totalUsageMillis ms = $usageMinutes min (base: $baseUsageMillis ms, live: $inProgressMillis ms)"
+                "Usage for $packageName: $totalUsageMillis ms = $usageMinutes min (calculated from events since midnight)"
             )
 
             return totalUsageMillis

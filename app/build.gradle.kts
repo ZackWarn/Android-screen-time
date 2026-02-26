@@ -8,6 +8,7 @@ plugins {
 extensions.configure<ApplicationExtension> {
     namespace = "com.example.screentime"
     compileSdk = 36
+
     defaultConfig {
         applicationId = "com.example.screentime"
         minSdk = 26
@@ -15,11 +16,13 @@ extensions.configure<ApplicationExtension> {
         versionCode = 1
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
         ksp {
             arg("room.schemaLocation", "$projectDir/schemas")
             arg("room.generateKotlin", "true")
         }
     }
+
     buildTypes {
         release {
             isMinifyEnabled = false

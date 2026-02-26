@@ -218,6 +218,15 @@ class AppMonitorService : Service() {
     }
     private fun showLimitExceededNotification(packageName: String, usedMinutes: Int, limitMinutes: Int) {
         try {
+            // Get app name
+            val appName = try {
+                val pm = applicationContext.packageManager
+                val appInfo = pm.getApplicationInfo(packageName, 0)
+                pm.getApplicationLabel(appInfo).toString()
+            } catch (e: Exception) {
+                packageName
+            }
+
             // Create intent to go to home screen immediately
             val homeIntent = Intent(Intent.ACTION_MAIN).apply {
                 addCategory(Intent.CATEGORY_HOME)
@@ -249,10 +258,10 @@ class AppMonitorService : Service() {
             // Build heads-up notification that appears from top
             val notification = NotificationCompat.Builder(this, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
-                .setContentTitle("⏱️ Time's Up!")
-                .setContentText("You've used $usedMinutes of $limitMinutes minutes.")
+                .setContentTitle("⏱️ $appName - Time's Up!")
+                .setContentText("You've used $usedMinutes of $limitMinutes minutes today.")
                 .setStyle(NotificationCompat.BigTextStyle()
-                    .bigText("You've reached your daily limit for this app.\n\nUsed: $usedMinutes minutes\nLimit: $limitMinutes minutes\n\nTake a break and try again tomorrow!"))
+                    .bigText("$appName has reached its daily limit.\n\n✓ Used: $usedMinutes minutes\n✓ Limit: $limitMinutes minutes\n\nTake a break and return after 12 noon tomorrow!"))
                 .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setCategory(NotificationCompat.CATEGORY_ALARM)
                 .setFullScreenIntent(blockedPendingIntent, true)
@@ -277,7 +286,7 @@ class AppMonitorService : Service() {
             val notificationId = packageName.hashCode() + 5000
             notificationManager.notify(notificationId, notification)
 
-            android.util.Log.d("AppMonitorService", "✅ Heads-up notification sent for $packageName (ID: $notificationId)")
+            android.util.Log.d("AppMonitorService", "✅ Heads-up notification sent for $appName (ID: $notificationId)")
 
             // Immediately send user to home screen
             try {
