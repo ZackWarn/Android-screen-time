@@ -8,11 +8,13 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationCompat
 import com.example.screentime.MainActivity
 import com.example.screentime.R
 import com.example.screentime.data.ScreenTimeDatabase
 import com.example.screentime.domain.managers.AppLimitManager
+import com.example.screentime.domain.managers.OverlayBlockManager
 import com.example.screentime.domain.models.LimitStatus
 import com.example.screentime.presentation.BlockedAppActivity
 import kotlinx.coroutines.CoroutineScope
@@ -22,6 +24,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 class AppMonitorService : Service() {
     private lateinit var appLimitManager: AppLimitManager
+    private lateinit var overlayBlockManager: OverlayBlockManager
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val handler = Handler(Looper.getMainLooper())
     private var monitoringRunnable: Runnable? = null
@@ -31,6 +34,7 @@ class AppMonitorService : Service() {
     private var lastWarningApp: String? = null
     private var lastWarningMinute: Int? = null
     private var lastAppUsageMinutes: Int = 0  // Track previous usage to detect changes
+    private var overlayShownForPackage: String? = null
 
     private inner class LimitChangeReceiver : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -68,6 +72,7 @@ class AppMonitorService : Service() {
         android.util.Log.d("AppMonitorService", "Service onCreate called")
         val database = ScreenTimeDatabase.getDatabase(applicationContext)
         appLimitManager = AppLimitManager(applicationContext, database.appLimitDao(), database)
+        overlayBlockManager = OverlayBlockManager(applicationContext)
 
         // Clear sessionSavedApps on service start
         sessionSavedApps.clear()
@@ -75,11 +80,12 @@ class AppMonitorService : Service() {
         // Register broadcast receiver for limit changes
         limitChangeReceiver = LimitChangeReceiver()
         val filter = IntentFilter("com.example.screentime.LIMIT_CHANGED")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(limitChangeReceiver, filter, RECEIVER_NOT_EXPORTED)
-        } else {
-            registerReceiver(limitChangeReceiver, filter)
-        }
+        ContextCompat.registerReceiver(
+            this,
+            limitChangeReceiver,
+            filter,
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
 
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, createNotification("Monitoring app usage..."))
@@ -123,6 +129,11 @@ class AppMonitorService : Service() {
                 if (currentApp != null && currentApp != packageName) {
                     android.util.Log.d("AppMonitorService", "Current app: $currentApp, Last checked: $lastCheckedApp")
 
+                    // Allow re-showing overlay after user leaves the previously blocked app.
+                    if (overlayShownForPackage != null && overlayShownForPackage != currentApp) {
+                        overlayShownForPackage = null
+                    }
+
                     // Always check the app usage
                     val status = appLimitManager.checkAppUsage(currentApp)
                     android.util.Log.d("AppMonitorService", "Status for $currentApp: ${status::class.simpleName}")
@@ -151,9 +162,23 @@ class AppMonitorService : Service() {
                         is LimitStatus.Exceeded -> {
                             android.util.Log.d("AppMonitorService", "LIMIT EXCEEDED for $currentApp: ${status.usedMinutes}/${status.limitMinutes} min")
 
-                            // Always show notification when limit is exceeded
-                            android.util.Log.d("AppMonitorService", "📢 Showing limit exceeded notification for $currentApp")
-                            showLimitExceededNotification(currentApp, status.usedMinutes, status.limitMinutes)
+                            // Show full-screen blocking overlay instead of heads-up notification.
+                            if (overlayShownForPackage != currentApp) {
+                                val appName = resolveAppName(currentApp)
+                                val shown = overlayBlockManager.showBlockingOverlay(
+                                    appName = appName,
+                                    usedMinutes = status.usedMinutes,
+                                    limitMinutes = status.limitMinutes
+                                )
+
+                                if (shown) {
+                                    overlayShownForPackage = currentApp
+                                    android.util.Log.d("AppMonitorService", "✅ Blocking overlay shown for $currentApp")
+                                } else {
+                                    android.util.Log.w("AppMonitorService", "Overlay unavailable, falling back to block activity for $currentApp")
+                                    showBlockDialog(currentApp, status.usedMinutes, status.limitMinutes)
+                                }
+                            }
                         }
                         is LimitStatus.WithinLimit -> {
                             android.util.Log.d("AppMonitorService", "Within limit for $currentApp: ${status.usedMinutes}/${status.limitMinutes} min")
@@ -170,6 +195,9 @@ class AppMonitorService : Service() {
                               }
                         }
                         else -> {
+                            if (overlayShownForPackage == currentApp) {
+                                overlayShownForPackage = null
+                            }
                             android.util.Log.d("AppMonitorService", "No limit set for $currentApp")
                         }
                     }
@@ -191,6 +219,16 @@ class AppMonitorService : Service() {
             putExtra("limitMinutes", limitMinutes)
         }
         startActivity(intent)
+    }
+
+    private fun resolveAppName(packageName: String): String {
+        return try {
+            val pm = applicationContext.packageManager
+            val appInfo = pm.getApplicationInfo(packageName, 0)
+            pm.getApplicationLabel(appInfo).toString()
+        } catch (e: Exception) {
+            packageName
+        }
     }
     private fun showLimitExceededNotification(packageName: String, usedMinutes: Int, limitMinutes: Int) {
         try {
@@ -233,7 +271,7 @@ class AppMonitorService : Service() {
 
             // Build heads-up notification (no auto-home or full-screen intent)
             val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setSmallIcon(R.drawable.ic_notification)
                 .setContentTitle("⏱️ $appName - Time's Up!")
                 .setContentText("You've used $usedMinutes of $limitMinutes minutes today.")
                 .setStyle(NotificationCompat.BigTextStyle()
@@ -279,7 +317,7 @@ class AppMonitorService : Service() {
             packageName
         }
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("$appName - Limit Warning")
             .setContentText("Only $remainingMinutes min left today.")
             .setStyle(NotificationCompat.BigTextStyle()
@@ -307,7 +345,7 @@ class AppMonitorService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Screen Time Monitor")
             .setContentText(text)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .build()
